@@ -214,7 +214,7 @@ def grafico_barras_categoria(df_cat: pd.DataFrame) -> go.Figure:
 # ------------------------------------------------------------------
 # App
 # ------------------------------------------------------------------
-st.title("📦 Dashboard Ejecutivo — Logística y Abastecimiento Non Food")
+st.title("📦 Seguimiento de Órdenes de Traslado ")
 st.caption("Evolución de líneas de órdenes de traslado a tienda — Equipo Abastecimientos Non Food")
 
 token = obtener_token()
