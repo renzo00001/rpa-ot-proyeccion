@@ -6,3 +6,4 @@ ent_virtual/
 *.xlsx
 .streamlit/secrets.toml
 pruebas_.py
+.claude/
