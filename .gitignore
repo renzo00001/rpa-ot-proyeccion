@@ -5,3 +5,4 @@ ent_virtual/
 *.duckdb
 *.xlsx
 .streamlit/secrets.toml
+pruebas_.py
