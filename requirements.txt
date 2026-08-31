@@ -1,0 +1,10 @@
+duckdb==1.5.5
+polars==1.44.1
+polars-runtime-32==1.44.1
+pyarrow==25.0.1
+pyperclip==1.11.0
+pywin32==312; sys_platform == "win32"
+streamlit==1.62.0
+pandas==3.0.5
+plotly==7.0.0
+python-dotenv

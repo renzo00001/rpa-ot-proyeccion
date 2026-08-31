@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+ent_virtual/
+*.duckdb
+*.xlsx
+.streamlit/secrets.toml
