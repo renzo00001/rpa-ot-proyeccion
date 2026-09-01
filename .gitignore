@@ -7,3 +7,4 @@ ent_virtual/
 .streamlit/secrets.toml
 pruebas_.py
 .claude/
+main.py
