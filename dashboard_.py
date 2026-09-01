@@ -151,10 +151,12 @@ def grafico_evolucion_lineas(evolucion: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=evolucion["fecha"], y=evolucion["generadas"],
         mode="lines+markers", name="Generadas", line=dict(color=COLOR_GENERADO, width=3),
+        hovertemplate="<b> %{y}<br>"
     ))
     fig.add_trace(go.Scatter(
         x=evolucion["fecha"], y=evolucion["pendientes"],
         mode="lines+markers", name="Pendientes", line=dict(color=COLOR_PENDIENTE, width=3),
+        hovertemplate="<b> %{y}<br>"
     ))
     fig.update_layout(
         xaxis_title="Fecha", yaxis_title="N° de líneas",
@@ -290,7 +292,7 @@ if total == 0:
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Total de Líneas", f"{total:,}")
 c2.metric("Generadas", f"{int(kpis['generadas']):,}")
-c3.metric("Pendientes", f"{int(kpis['pendientes']):,}", f"{pct_pendiente:.1%} del total")
+c3.metric("Pendientes", f"{int(kpis['pendientes']):,}", f"{pct_pendiente:.1%} del total",delta_color='inverse')
 c4.metric("Importe Total", f"S/ {kpis['importe_total']:,.0f}")
 c5.metric("Importe Pendiente", f"S/ {kpis['importe_pendiente']:,.0f}")
 
