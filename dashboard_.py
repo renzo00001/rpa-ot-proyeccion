@@ -35,6 +35,7 @@ COL_FECHA = "fecha_entrega_actualizada"
 COL_GERENCIA = "gerencia"
 COL_UNIDAD = "unidad_de_negocio"
 COL_IMPORTE = "Importe"
+COL_ACTUALIZACION = "fecha_hora_actualizacion"
 
 ESTADO_GENERADO = "generado"
 ESTADO_PENDIENTE = "pendiente"
@@ -47,7 +48,7 @@ LIMITE_FILAS_EXCEL = 500_000
 LIMITE_ALERTA_LINEAS = 4000
 
 st.set_page_config(
-    page_title="Dashboard Ejecutivo — Non Food",
+    page_title="Dashboard Ejecutivo ",
     page_icon="📦",
     layout="wide",
 )
@@ -85,6 +86,10 @@ def obtener_metadatos(con):
         f"SELECT MIN(CAST({COL_FECHA} AS DATE)), MAX(CAST({COL_FECHA} AS DATE)) FROM {TABLA}"
     ).fetchone()
     return gerencias, fecha_min, fecha_max
+
+
+def obtener_ultima_actualizacion(con):
+    return con.execute(f"SELECT MAX({COL_ACTUALIZACION}) FROM {TABLA}").fetchone()[0]
 
 
 def construir_filtro(gerencias_sel, fecha_ini, fecha_fin):
@@ -168,24 +173,32 @@ def _layout_oscuro(fig: go.Figure, altura: int = 340, margen_top: int = 10) -> g
 
 def grafico_ritmo_diario(evolucion: pd.DataFrame, limite_alerta: int = LIMITE_ALERTA_LINEAS) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=evolucion["fecha"], y=evolucion["generadas"], mode="lines", name="Generadas",
-        line=dict(color=COLOR_GENERADO, width=2), fill="tozeroy", fillcolor=_rgba(COLOR_GENERADO, 0.15),
+    fig.add_trace(go.Bar(
+        x=evolucion["fecha"], y=evolucion["generadas"], name="Generadas",
+        marker=dict(color=COLOR_GENERADO, line_width=0),
         hovertemplate="%{y:,}<extra></extra>",
     ))
-    fig.add_trace(go.Scatter(
-        x=evolucion["fecha"], y=evolucion["pendientes"], mode="lines", name="Pendientes",
-        line=dict(color=COLOR_PENDIENTE, width=2), fill="tozeroy", fillcolor=_rgba(COLOR_PENDIENTE, 0.15),
+    fig.add_trace(go.Bar(
+        x=evolucion["fecha"], y=evolucion["pendientes"], name="Pendientes",
+        marker=dict(color=COLOR_PENDIENTE, line_width=0),
         hovertemplate="%{y:,}<extra></extra>",
     ))
     if len(evolucion):
+        totales = evolucion["generadas"] + evolucion["pendientes"]
+        fig.add_trace(go.Scatter(
+            x=evolucion["fecha"], y=totales, mode="text",
+            text=[f"{t:,.0f}" for t in totales], textposition="top center",
+            textfont=dict(color="#c7ccd6", size=10),
+            hoverinfo="skip", showlegend=False,
+        ))
         fig.add_trace(go.Scatter(
             x=[evolucion["fecha"].min(), evolucion["fecha"].max()], y=[limite_alerta, limite_alerta],
             mode="lines", name=f"Alerta {limite_alerta:,}",
             line=dict(color=COLOR_ALERTA, width=1.5, dash="dash"), hoverinfo="skip",
         ))
+    fig.update_layout(barmode="stack", bargap=0.25)
     fig.update_yaxes(title_text="N° de líneas")
-    return _layout_oscuro(fig)
+    return _layout_oscuro(fig, margen_top=28)
 
 
 def grafico_brecha_acumulada(evolucion: pd.DataFrame) -> go.Figure:
@@ -259,9 +272,18 @@ CSS_TARJETAS = """
 .rpa-bar-track { display: flex; height: 8px; border-radius: 6px; overflow: hidden;
     background: rgba(140,150,170,0.15); }
 .rpa-bar-fill { height: 100%; }
-.rpa-fila { margin-bottom: 14px; }
+.rpa-fila { margin-bottom: 14px; position: relative; }
 .rpa-fila-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 5px; }
 .rpa-fila-nums { font-family: 'Courier New', monospace; font-size: 12px; color: #8b93a7; }
+.rpa-tooltip-wrap { cursor: default; }
+.rpa-tooltip-box {
+    visibility: hidden; opacity: 0; transition: opacity 0.15s ease;
+    position: absolute; bottom: 100%; left: 0; margin-bottom: 6px;
+    background: #1c2436; border: 1px solid rgba(140,150,170,0.3);
+    border-radius: 6px; padding: 6px 10px; font-size: 11px; color: #c7ccd6;
+    white-space: nowrap; z-index: 20; font-family: Arial, Helvetica, sans-serif;
+}
+.rpa-tooltip-wrap:hover .rpa-tooltip-box { visibility: visible; opacity: 1; }
 </style>
 """
 
@@ -292,22 +314,23 @@ def tarjeta_dos_metricas(titulo: str, total_texto: str,
     """, unsafe_allow_html=True)
 
 
-def fila_categoria(categoria: str, generadas: float, pendientes: float, ancho_pct: float,
-                    etiqueta_derecha: str) -> None:
+def fila_categoria(categoria: str, generadas: float, pendientes: float, ancho_pct: float) -> None:
     total_cat = generadas + pendientes
     pct_gen = (generadas / total_cat * 100) if total_cat else 0
     pct_pend = 100 - pct_gen
+    tooltip = f"Generadas: {generadas:,.0f} · Pendientes: {pendientes:,.0f} · Total: {total_cat:,.0f}"
     st.markdown(f"""
-    <div class="rpa-fila">
+    <div class="rpa-fila rpa-tooltip-wrap">
         <div class="rpa-fila-head">
             <span>{categoria}</span>
-            <span class="rpa-fila-nums">{generadas:,.0f} &nbsp; {pendientes:,.0f} &nbsp;
-                <b style="color:{COLOR_PENDIENTE if pct_pend >= 50 else COLOR_GENERADO}">{etiqueta_derecha}</b></span>
+            <span class="rpa-fila-nums">
+                <b style="color:{COLOR_PENDIENTE if pct_pend >= 50 else COLOR_GENERADO}">{pct_pend:.1f}% pend.</b></span>
         </div>
         <div class="rpa-bar-track" style="width:{ancho_pct:.3f}%;">
             <div class="rpa-bar-fill" style="width:{pct_gen:.3f}%; background:{COLOR_GENERADO};"></div>
             <div class="rpa-bar-fill" style="width:{pct_pend:.3f}%; background:{COLOR_PENDIENTE};"></div>
         </div>
+        <div class="rpa-tooltip-box">{tooltip}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -320,8 +343,7 @@ def render_por_gerencia(por_gerencia: pd.DataFrame) -> None:
     max_total = totales.max()
     for _, row in por_gerencia.assign(total=totales).sort_values("total", ascending=False).iterrows():
         ancho = (row["total"] / max_total * 100) if max_total else 0
-        pct_pend = (row["pendientes"] / row["total"] * 100) if row["total"] else 0
-        fila_categoria(row["categoria"], row["generadas"], row["pendientes"], ancho, f"{pct_pend:.1f}%")
+        fila_categoria(row["categoria"], row["generadas"], row["pendientes"], ancho)
 
 
 def render_por_unidad(por_unidad: pd.DataFrame) -> None:
@@ -330,14 +352,11 @@ def render_por_unidad(por_unidad: pd.DataFrame) -> None:
         return
     df = por_unidad.copy()
     df["total"] = df["generadas"] + df["pendientes"]
-    df["pct_pend"] = df["pendientes"] / df["total"].replace(0, pd.NA)
-    df = df.sort_values("pct_pend", ascending=False, na_position="last")
+    df = df.sort_values("total", ascending=False)
     max_total = df["total"].max()
     for _, row in df.iterrows():
         ancho = (row["total"] / max_total * 100) if max_total else 0
-        pct_pend = (row["pct_pend"] * 100) if pd.notna(row["pct_pend"]) else 0
-        fila_categoria(row["categoria"], row["generadas"], row["pendientes"], ancho,
-                        f"{row['total']:,.0f} · {pct_pend:.1f}% pend.")
+        fila_categoria(row["categoria"], row["generadas"], row["pendientes"], ancho)
 
 
 # ------------------------------------------------------------------
@@ -354,16 +373,19 @@ if not token:
     )
     st.stop()
 
-with st.sidebar:
-    if st.button("🔄 Recargar datos"):
-        st.cache_resource.clear()
-        st.rerun()
-
 try:
     con = conectar(token)
 except Exception as e:
     st.error(f"No se pudo conectar a la tabla '{TABLA}': {e}")
     st.stop()
+
+with st.sidebar:
+    ultima_actualizacion = obtener_ultima_actualizacion(con)
+    if ultima_actualizacion is not None:
+        st.caption(f"🕒 Dashboard actualizado: {ultima_actualizacion:%d/%m/%Y %H:%M}")
+    if st.button("🔄 Recargar datos"):
+        st.cache_resource.clear()
+        st.rerun()
 
 gerencias_disp, fecha_min, fecha_max = obtener_metadatos(con)
 
@@ -435,7 +457,7 @@ def _monto_corto(valor: float) -> str:
 st.markdown(f"""
 <div class="rpa-topbar-label">LOGÍSTICA · TRASLADOS A TIENDA</div>
 <div class="rpa-topbar-wrap">
-    <div class="rpa-topbar-title">Seguimiento de Órdenes de Traslado</div>
+    <div class="rpa-topbar-title">Seguimiento de Órdenes de Traslado - CD10</div>
     <div class="rpa-topbar-meta">
         PERIODO<br><b>{fecha_ini:%d %b} — {fecha_fin:%d %b %Y}</b>
         &nbsp;&nbsp;&nbsp;&nbsp;
@@ -486,6 +508,6 @@ with col_c:
 with col_d:
     with st.container(border=True):
         st.markdown('<div class="rpa-card-title">POR UNIDAD DE NEGOCIO</div>', unsafe_allow_html=True)
-        st.caption("Ordenado por % de pendientes")
+        st.caption("Ordenado por cantidad de líneas")
         render_por_unidad(por_unidad)
 
