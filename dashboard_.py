@@ -176,12 +176,12 @@ def grafico_ritmo_diario(evolucion: pd.DataFrame, limite_alerta: int = LIMITE_AL
     fig.add_trace(go.Bar(
         x=evolucion["fecha"], y=evolucion["generadas"], name="Generadas",
         marker=dict(color=COLOR_GENERADO, line_width=0),
-        hovertemplate="%{y:,}<extra></extra>",
+        hovertemplate="Generadas: %{y:,}<extra></extra>",
     ))
     fig.add_trace(go.Bar(
         x=evolucion["fecha"], y=evolucion["pendientes"], name="Pendientes",
         marker=dict(color=COLOR_PENDIENTE, line_width=0),
-        hovertemplate="%{y:,}<extra></extra>",
+        hovertemplate="Pendientes: %{y:,}<extra></extra>",
     ))
     if len(evolucion):
         totales = evolucion["generadas"] + evolucion["pendientes"]
@@ -196,9 +196,12 @@ def grafico_ritmo_diario(evolucion: pd.DataFrame, limite_alerta: int = LIMITE_AL
             mode="lines", name=f"Alerta {limite_alerta:,}",
             line=dict(color=COLOR_ALERTA, width=1.5, dash="dash"), hoverinfo="skip",
         ))
-    fig.update_layout(barmode="stack", bargap=0.25)
+    fig.update_layout(barmode="stack", bargap=0.25, hovermode="x unified")
+    fig.update_xaxes(hoverformat=" ")
     fig.update_yaxes(title_text="N° de líneas")
-    return _layout_oscuro(fig, margen_top=28)
+    fig = _layout_oscuro(fig, margen_top=28)
+    fig.update_yaxes(gridcolor="rgba(140,150,170,0.08)")
+    return fig
 
 
 def grafico_brecha_acumulada(evolucion: pd.DataFrame) -> go.Figure:
@@ -256,7 +259,8 @@ CSS_TARJETAS = """
     letter-spacing: 3px; font-size: 11px; color: #8b93a7; margin-bottom: 6px;
 }
 .rpa-topbar-title { font-size: 32px; font-weight: 800; margin: 0; line-height: 1.2; }
-.rpa-topbar-meta { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #8b93a7; text-align: right; line-height: 1.5; }
+.rpa-topbar-meta { display: flex; gap: 32px; font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #8b93a7; line-height: 1.5; }
+.rpa-topbar-meta-item { text-align: right; white-space: nowrap; }
 .rpa-topbar-meta b { color: inherit; font-size: 15px; }
 .rpa-topbar-wrap { display:flex; justify-content:space-between; align-items:flex-end;
     border-bottom: 1px solid rgba(140,150,170,0.25); padding-bottom: 16px; margin-bottom: 22px; }
@@ -382,7 +386,7 @@ except Exception as e:
 with st.sidebar:
     ultima_actualizacion = obtener_ultima_actualizacion(con)
     if ultima_actualizacion is not None:
-        st.caption(f"🕒 Dashboard actualizado: {ultima_actualizacion:%d/%m/%Y %H:%M}")
+        st.caption(f"🕒 Dashboard actualizado: \n\t{ultima_actualizacion:%d/%m/%Y %H:%M}")
     if st.button("🔄 Recargar datos"):
         st.cache_resource.clear()
         st.rerun()
@@ -459,9 +463,8 @@ st.markdown(f"""
 <div class="rpa-topbar-wrap">
     <div class="rpa-topbar-title">Seguimiento de Órdenes de Traslado - CD10</div>
     <div class="rpa-topbar-meta">
-        PERIODO<br><b>{fecha_ini:%d %b} — {fecha_fin:%d %b %Y}</b>
-        &nbsp;&nbsp;&nbsp;&nbsp;
-        ÓRDENES · LÍNEAS<br><b>{total:,} líneas</b>
+        <div class="rpa-topbar-meta-item">PERIODO<br><b>{fecha_ini:%d %b} — {fecha_fin:%d %b %Y}</b></div>
+        <div class="rpa-topbar-meta-item">ÓRDENES · LÍNEAS<br><b>{total:,} líneas</b></div>
     </div>
 </div>
 """, unsafe_allow_html=True)
