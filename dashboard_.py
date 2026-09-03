@@ -36,6 +36,7 @@ COL_GERENCIA = "gerencia"
 COL_UNIDAD = "unidad_de_negocio"
 COL_IMPORTE = "Importe"
 COL_ACTUALIZACION = "fecha_hora_actualizacion"
+COL_CLASE_DOC = "clase_documento"
 
 ESTADO_GENERADO = "generado"
 ESTADO_PENDIENTE = "pendiente"
@@ -45,7 +46,7 @@ COLOR_PENDIENTE = "#F59E0B"
 COLOR_ALERTA = "#EF4444"
 
 LIMITE_FILAS_EXCEL = 500_000
-LIMITE_ALERTA_LINEAS = 4000
+LIMITE_ALERTA_LINEAS = 6000
 
 st.set_page_config(
     page_title="Dashboard Ejecutivo ",
@@ -71,7 +72,7 @@ def conectar(token: str):
     con = duckdb.connect(f"md:{MOTHERDUCK_DB}?motherduck_token={token}", read_only=True)
     con.execute("INSTALL excel; LOAD excel;")
     columnas = {c[0] for c in con.execute(f"DESCRIBE {TABLA}").fetchall()}
-    requeridas = {COL_STATUS, COL_FECHA, COL_GERENCIA, COL_UNIDAD, COL_IMPORTE}
+    requeridas = {COL_STATUS, COL_FECHA, COL_GERENCIA, COL_UNIDAD, COL_IMPORTE, COL_CLASE_DOC}
     faltantes = requeridas - columnas
     if faltantes:
         raise ValueError(f"A la tabla '{TABLA}' le faltan columnas: {sorted(faltantes)}")
@@ -82,23 +83,28 @@ def obtener_metadatos(con):
     gerencias = con.execute(
         f"SELECT DISTINCT {COL_GERENCIA} FROM {TABLA} ORDER BY 1"
     ).df()[COL_GERENCIA].tolist()
+    clases_doc = con.execute(
+        f"SELECT DISTINCT {COL_CLASE_DOC} FROM {TABLA} ORDER BY 1"
+    ).df()[COL_CLASE_DOC].tolist()
     fecha_min, fecha_max = con.execute(
         f"SELECT MIN(CAST({COL_FECHA} AS DATE)), MAX(CAST({COL_FECHA} AS DATE)) FROM {TABLA}"
     ).fetchone()
-    return gerencias, fecha_min, fecha_max
+    return gerencias, clases_doc, fecha_min, fecha_max
 
 
 def obtener_ultima_actualizacion(con):
     return con.execute(f"SELECT MAX({COL_ACTUALIZACION}) FROM {TABLA}").fetchone()[0]
 
 
-def construir_filtro(gerencias_sel, fecha_ini, fecha_fin):
-    placeholders = ",".join(["?"] * len(gerencias_sel))
+def construir_filtro(gerencias_sel, clases_sel, fecha_ini, fecha_fin):
+    ph_gerencias = ",".join(["?"] * len(gerencias_sel))
+    ph_clases = ",".join(["?"] * len(clases_sel))
     where = (
-        f"WHERE {COL_GERENCIA} IN ({placeholders}) "
+        f"WHERE {COL_GERENCIA} IN ({ph_gerencias}) "
+        f"""AND {COL_CLASE_DOC} IN ({ph_clases}) AND tiene_entrega = 'NO' """
         f"AND CAST({COL_FECHA} AS DATE) BETWEEN ? AND ?"
     )
-    params = list(gerencias_sel) + [fecha_ini, fecha_fin]
+    params = list(gerencias_sel) + list(clases_sel) + [fecha_ini, fecha_fin]
     return where, params
 
 
@@ -171,33 +177,82 @@ def _layout_oscuro(fig: go.Figure, altura: int = 340, margen_top: int = 10) -> g
     return fig
 
 
-def grafico_ritmo_diario(evolucion: pd.DataFrame, limite_alerta: int = LIMITE_ALERTA_LINEAS) -> go.Figure:
+MESES_ABREV = {1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr", 5: "May", 6: "Jun",
+                7: "Jul", 8: "Ago", 9: "Set", 10: "Oct", 11: "Nov", 12: "Dic"}
+
+
+def _fmt_dia_mes(fecha) -> str:
+    return f"{fecha.day} {MESES_ABREV[fecha.month]}"
+
+
+def agrupar_evolucion(evolucion: pd.DataFrame, vista: str) -> pd.DataFrame:
+    """Agrupa la evolución diaria a nivel Día / Semana (lun-dom) / Mensual."""
+    df = evolucion.copy()
+    if df.empty or vista == "Día":
+        df["etiqueta"] = df["fecha"].apply(_fmt_dia_mes) if len(df) else []
+        return df
+
+    df["fecha"] = pd.to_datetime(df["fecha"])
+    periodo = df["fecha"].dt.to_period("W-SUN") if vista == "Semana" else df["fecha"].dt.to_period("M")
+
+    agg = df.groupby(periodo).agg(
+        generadas=("generadas", "sum"),
+        pendientes=("pendientes", "sum"),
+        importe_total=("importe_total", "sum"),
+        fecha_ini=("fecha", "min"),
+        fecha_fin=("fecha", "max"),
+    ).reset_index(drop=True)
+
+    if vista == "Semana":
+        def etiqueta_semana(row):
+            d1, d2 = row["fecha_ini"], row["fecha_fin"]
+            if d1.date() == d2.date():
+                return _fmt_dia_mes(d1)
+            if d1.month == d2.month:
+                return f"{d1.day}-{d2.day} {MESES_ABREV[d1.month]}"
+            return f"{d1.day} {MESES_ABREV[d1.month]} - {d2.day} {MESES_ABREV[d2.month]}"
+        agg["etiqueta"] = agg.apply(etiqueta_semana, axis=1)
+    else:
+        agg["etiqueta"] = agg["fecha_ini"].apply(lambda d: f"{MESES_ABREV[d.month]} {d.year}")
+
+    agg["fecha"] = agg["fecha_ini"]
+    return agg.sort_values("fecha_ini").reset_index(drop=True)
+
+
+def grafico_ritmo_diario(df: pd.DataFrame, mostrar_alerta: bool = True,
+                          limite_alerta: int = LIMITE_ALERTA_LINEAS,
+                          usar_categorias: bool = False) -> go.Figure:
+    x = df["etiqueta"] if usar_categorias else df["fecha"]
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        x=evolucion["fecha"], y=evolucion["generadas"], name="Generadas",
+        x=x, y=df["generadas"], name="Generadas",
         marker=dict(color=COLOR_GENERADO, line_width=0),
         hovertemplate="Generadas: %{y:,}<extra></extra>",
     ))
     fig.add_trace(go.Bar(
-        x=evolucion["fecha"], y=evolucion["pendientes"], name="Pendientes",
+        x=x, y=df["pendientes"], name="Pendientes",
         marker=dict(color=COLOR_PENDIENTE, line_width=0),
         hovertemplate="Pendientes: %{y:,}<extra></extra>",
     ))
-    if len(evolucion):
-        totales = evolucion["generadas"] + evolucion["pendientes"]
+    if len(df):
+        totales = df["generadas"] + df["pendientes"]
         fig.add_trace(go.Scatter(
-            x=evolucion["fecha"], y=totales, mode="text",
+            x=x, y=totales, mode="text",
             text=[f"{t:,.0f}" for t in totales], textposition="top center",
             textfont=dict(color="#c7ccd6", size=10),
             hoverinfo="skip", showlegend=False,
         ))
-        fig.add_trace(go.Scatter(
-            x=[evolucion["fecha"].min(), evolucion["fecha"].max()], y=[limite_alerta, limite_alerta],
-            mode="lines", name=f"Alerta {limite_alerta:,}",
-            line=dict(color=COLOR_ALERTA, width=1.5, dash="dash"), hoverinfo="skip",
-        ))
+        if mostrar_alerta:
+            fig.add_trace(go.Scatter(
+                x=[x.iloc[0], x.iloc[-1]], y=[limite_alerta, limite_alerta],
+                mode="lines", name=f"Alerta {limite_alerta:,}",
+                line=dict(color=COLOR_ALERTA, width=1.5, dash="dash"), hoverinfo="skip",
+            ))
     fig.update_layout(barmode="stack", bargap=0.25, hovermode="x unified")
-    fig.update_xaxes(hoverformat=" ")
+    if usar_categorias:
+        fig.update_xaxes(type="category")
+    else:
+        fig.update_xaxes(hoverformat=" ")
     fig.update_yaxes(title_text="N° de líneas")
     fig = _layout_oscuro(fig, margen_top=28)
     fig.update_yaxes(gridcolor="rgba(140,150,170,0.08)")
@@ -288,6 +343,9 @@ CSS_TARJETAS = """
     white-space: nowrap; z-index: 20; font-family: Arial, Helvetica, sans-serif;
 }
 .rpa-tooltip-wrap:hover .rpa-tooltip-box { visibility: visible; opacity: 1; }
+div[data-testid="stColumn"]:has(.st-key-vista_ritmo) {
+    display: flex; justify-content: flex-end; align-items: center;
+}
 </style>
 """
 
@@ -391,16 +449,21 @@ with st.sidebar:
         st.cache_resource.clear()
         st.rerun()
 
-gerencias_disp, fecha_min, fecha_max = obtener_metadatos(con)
+gerencias_disp, clases_doc_disp, fecha_min, fecha_max = obtener_metadatos(con)
 
 with st.sidebar:
     st.header("Filtros")
     gerencias_sel = st.multiselect("Gerencia", gerencias_disp, default=gerencias_disp)
     rango = st.date_input("Rango de fechas", value=(fecha_min, fecha_max),
                            min_value=fecha_min, max_value=fecha_max)
+    clases_sel = st.multiselect("Clase de documento", clases_doc_disp, default=clases_doc_disp)
 
 if not gerencias_sel:
     st.warning("Selecciona al menos una gerencia.")
+    st.stop()
+
+if not clases_sel:
+    st.warning("Selecciona al menos una clase de documento.")
     st.stop()
 
 if isinstance(rango, tuple) and len(rango) == 2:
@@ -408,7 +471,7 @@ if isinstance(rango, tuple) and len(rango) == 2:
 else:
     fecha_ini, fecha_fin = fecha_min, fecha_max
 
-where, params = construir_filtro(gerencias_sel, fecha_ini, fecha_fin)
+where, params = construir_filtro(gerencias_sel, clases_sel, fecha_ini, fecha_fin)
 
 with st.sidebar:
     st.divider()
@@ -489,9 +552,26 @@ evolucion = calcular_evolucion(con, where, params)
 col_a, col_b = st.columns(2)
 with col_a:
     with st.container(border=True):
-        st.markdown('<div class="rpa-card-title">RITMO DIARIO</div>', unsafe_allow_html=True)
-        st.caption("Líneas generadas y pendientes por día")
-        st.plotly_chart(grafico_ritmo_diario(evolucion), width="stretch")
+        col_titulo, col_vista = st.columns([1, 1.6])
+        with col_titulo:
+            st.markdown('<div class="rpa-card-title" style="padding-top:8px;">RITMO DIARIO</div>',
+                         unsafe_allow_html=True)
+        with col_vista:
+            vista_ritmo = st.segmented_control(
+                "Vista", ["Día", "Semana", "Mensual"], default="Día",
+                key="vista_ritmo", label_visibility="collapsed",
+            )
+        vista_ritmo = vista_ritmo or "Día"
+        st.caption(f"Barra apilada por {vista_ritmo.lower()} · total sobre la barra")
+        df_ritmo = agrupar_evolucion(evolucion, vista_ritmo)
+        st.plotly_chart(
+            grafico_ritmo_diario(
+                df_ritmo,
+                mostrar_alerta=(vista_ritmo == "Día"),
+                usar_categorias=(vista_ritmo != "Día"),
+            ),
+            width="stretch",
+        )
 with col_b:
     with st.container(border=True):
         st.markdown('<div class="rpa-card-title">BRECHA ACUMULADA</div>', unsafe_allow_html=True)

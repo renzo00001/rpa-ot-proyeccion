@@ -16,6 +16,10 @@ def ejecutar_querys(ruta_db,df_zlo_pedi_val:pl.DataFrame ,df_marm:pl.DataFrame ,
                     DELETE FROM proyectado WHERE fecha_entrega BETWEEN '{fecha_inicio}' AND '{fecha_fin}';
                     INSERT INTO proyectado SELECT * FROM df_zlo_pedi_val;
 
+                    UPDATE proyectado
+                    SET tiene_entrega = 'SI'
+                    WHERE OT IN (SELECT DISTINCT(OT) FROM proyectado WHERE tiene_entrega = 'SI' )
+
                     DELETE FROM MARM;
                     INSERT INTO MARM SELECT * FROM df_marm;
 
