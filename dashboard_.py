@@ -37,6 +37,7 @@ COL_UNIDAD = "unidad_de_negocio"
 COL_IMPORTE = "Importe"
 COL_ACTUALIZACION = "fecha_hora_actualizacion"
 COL_CLASE_DOC = "clase_documento"
+COL_TIENE_ENTREGA = "tiene_entrega"
 
 ESTADO_GENERADO = "generado"
 ESTADO_PENDIENTE = "pendiente"
@@ -81,13 +82,13 @@ def conectar(token: str):
 
 def obtener_metadatos(con):
     gerencias = con.execute(
-        f"SELECT DISTINCT {COL_GERENCIA} FROM {TABLA} WHERE tiene_entrega = 'NO' ORDER BY 1"
+        f"SELECT DISTINCT {COL_GERENCIA} FROM {TABLA} WHERE tiene_entrega = 'NO' OR ( tiene_entrega = 'SI' AND Status = 'generado')  ORDER BY 1"
     ).df()[COL_GERENCIA].tolist()
     clases_doc = con.execute(
-        f"SELECT DISTINCT {COL_CLASE_DOC} FROM {TABLA} WHERE tiene_entrega = 'NO' ORDER BY 1"
+        f"SELECT DISTINCT {COL_CLASE_DOC} FROM {TABLA} WHERE tiene_entrega = 'NO' OR ( tiene_entrega = 'SI' AND Status = 'generado')  ORDER BY 1"
     ).df()[COL_CLASE_DOC].tolist()
     fecha_min, fecha_max = con.execute(
-        f"""SELECT MIN(CAST({COL_FECHA} AS DATE)), MAX(CAST({COL_FECHA} AS DATE)) FROM {TABLA} WHERE tiene_entrega = 'NO' """
+        f"""SELECT MIN(CAST({COL_FECHA} AS DATE)), MAX(CAST({COL_FECHA} AS DATE)) FROM {TABLA} WHERE tiene_entrega = 'NO' OR ( tiene_entrega = 'SI' AND Status = 'generado')  """
     ).fetchone()
     return gerencias, clases_doc, fecha_min, fecha_max
 
@@ -101,7 +102,23 @@ def construir_filtro(gerencias_sel, clases_sel, fecha_ini, fecha_fin):
     ph_clases = ",".join(["?"] * len(clases_sel))
     where = (
         f"WHERE {COL_GERENCIA} IN ({ph_gerencias}) "
-        f"""AND {COL_CLASE_DOC} IN ({ph_clases}) AND tiene_entrega = 'NO' """
+        f"""AND {COL_CLASE_DOC} IN ({ph_clases}) AND (tiene_entrega = 'NO' OR ( tiene_entrega = 'SI' AND Status = 'generado'))   """
+        f"AND CAST({COL_FECHA} AS DATE) BETWEEN ? AND ?"
+    )
+    params = list(gerencias_sel) + list(clases_sel) + [fecha_ini, fecha_fin]
+    return where, params
+
+
+def construir_filtro_entregas(gerencias_sel, clases_sel, fecha_ini, fecha_fin):
+    """Igual que construir_filtro, pero sin la excepción de tiene_entrega='NO':
+    aquí solo interesan las órdenes que YA tienen una entrega generada en SAP
+    (tiene_entrega='SI'), sea cual sea su Status."""
+    ph_gerencias = ",".join(["?"] * len(gerencias_sel))
+    ph_clases = ",".join(["?"] * len(clases_sel))
+    where = (
+        f"WHERE {COL_GERENCIA} IN ({ph_gerencias}) "
+        f"AND {COL_CLASE_DOC} IN ({ph_clases}) "
+        f"AND {COL_TIENE_ENTREGA} = 'SI' "
         f"AND CAST({COL_FECHA} AS DATE) BETWEEN ? AND ?"
     )
     params = list(gerencias_sel) + list(clases_sel) + [fecha_ini, fecha_fin]
@@ -182,7 +199,7 @@ MESES_ABREV = {1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr", 5: "May", 6: "Jun",
 
 
 def _fmt_dia_mes(fecha) -> str:
-    return f"{fecha.day} {MESES_ABREV[fecha.month]}"
+    return f"{fecha.day:02d} {MESES_ABREV[fecha.month]}"
 
 
 def agrupar_evolucion(evolucion: pd.DataFrame, vista: str) -> pd.DataFrame:
@@ -227,12 +244,12 @@ def grafico_ritmo_diario(df: pd.DataFrame, mostrar_alerta: bool = True,
     fig.add_trace(go.Bar(
         x=x, y=df["generadas"], name="Generadas",
         marker=dict(color=COLOR_GENERADO, line_width=0),
-        hovertemplate="Generadas: %{y:,}<extra></extra>",
+        hoverinfo="skip",
     ))
     fig.add_trace(go.Bar(
         x=x, y=df["pendientes"], name="Pendientes",
         marker=dict(color=COLOR_PENDIENTE, line_width=0),
-        hovertemplate="Pendientes: %{y:,}<extra></extra>",
+        hoverinfo="skip",
     ))
     if len(df):
         totales = df["generadas"] + df["pendientes"]
@@ -241,6 +258,20 @@ def grafico_ritmo_diario(df: pd.DataFrame, mostrar_alerta: bool = True,
             text=[f"{t:,.0f}" for t in totales], textposition="top center",
             textfont=dict(color="#c7ccd6", size=10),
             hoverinfo="skip", showlegend=False,
+        ))
+        customdata = list(zip(df["etiqueta"], df["generadas"], df["pendientes"]))
+        prefijo_fecha = "" if usar_categorias else "%{customdata[0]}<br>"
+        fig.add_trace(go.Scatter(
+            x=x, y=totales, mode="markers",
+            marker=dict(size=6, color="rgba(0,0,0,0)"),
+            customdata=customdata,
+            hovertemplate=(
+                f"{prefijo_fecha}"
+                f'<span style="color:{COLOR_GENERADO}">■</span> Generadas: %{{customdata[1]:,}}<br>'
+                f'<span style="color:{COLOR_PENDIENTE}">■</span> Pendientes: %{{customdata[2]:,}}'
+                "<extra></extra>"
+            ),
+            showlegend=False,
         ))
         if mostrar_alerta:
             fig.add_trace(go.Scatter(
@@ -263,19 +294,34 @@ def grafico_brecha_acumulada(evolucion: pd.DataFrame) -> go.Figure:
     df = evolucion.sort_values("fecha").copy()
     df["gen_acum"] = df["generadas"].cumsum()
     df["pend_acum"] = df["pendientes"].cumsum()
+    df["etiqueta"] = df["fecha"].apply(_fmt_dia_mes) if len(df) else []
     brecha_final = int(df["pend_acum"].iloc[-1] - df["gen_acum"].iloc[-1]) if len(df) else 0
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df["fecha"], y=df["gen_acum"], mode="lines", name="Generadas (acum.)",
         line=dict(color=COLOR_GENERADO, width=2),
-        hovertemplate="%{y:,}<extra></extra>",
+        hoverinfo="skip",
     ))
     fig.add_trace(go.Scatter(
         x=df["fecha"], y=df["pend_acum"], mode="lines", name="Pendientes (acum.)",
         line=dict(color=COLOR_PENDIENTE, width=2), fill="tonexty", fillcolor=_rgba(COLOR_PENDIENTE, 0.12),
-        hovertemplate="%{y:,}<extra></extra>",
+        hoverinfo="skip",
     ))
+    if len(df):
+        customdata = list(zip(df["etiqueta"], df["gen_acum"], df["pend_acum"]))
+        fig.add_trace(go.Scatter(
+            x=df["fecha"], y=df["pend_acum"], mode="markers",
+            marker=dict(size=6, color="rgba(0,0,0,0)"),
+            customdata=customdata,
+            hovertemplate=(
+                "%{customdata[0]}<br>"
+                f'<span style="color:{COLOR_GENERADO}">■</span> Generadas (acum.): %{{customdata[1]:,}}<br>'
+                f'<span style="color:{COLOR_PENDIENTE}">■</span> Pendientes (acum.): %{{customdata[2]:,}}'
+                "<extra></extra>"
+            ),
+            showlegend=False,
+        ))
     signo = "+" if brecha_final >= 0 else ""
     color_brecha = COLOR_PENDIENTE if brecha_final >= 0 else COLOR_GENERADO
     fig.add_annotation(
@@ -283,6 +329,8 @@ def grafico_brecha_acumulada(evolucion: pd.DataFrame) -> go.Figure:
         text=f"brecha final {signo}{brecha_final:,}",
         font=dict(color=color_brecha, size=13, family="Courier New, monospace"),
     )
+    fig.update_layout(hovermode="x unified")
+    fig.update_xaxes(hoverformat=" ")
     fig.update_yaxes(title_text="Líneas acumuladas")
     fig = _layout_oscuro(fig, margen_top=30)
     fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="left", x=0))
@@ -345,6 +393,19 @@ CSS_TARJETAS = """
 .rpa-tooltip-wrap:hover .rpa-tooltip-box { visibility: visible; opacity: 1; }
 div[data-testid="stColumn"]:has(.st-key-vista_ritmo) {
     display: flex; justify-content: flex-end; align-items: center;
+}
+div[data-testid="stColumn"]:has(.st-key-vista_entregas) {
+    display: flex; justify-content: flex-end; align-items: center;
+}
+.st-key-card_entregas {
+    background: rgba(139, 92, 246, 0.08) !important;
+    border-color: rgba(139, 92, 246, 0.4) !important;
+}
+.rpa-badge-morado {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(139, 92, 246, 0.18); border: 1px solid rgba(139, 92, 246, 0.5);
+    color: #C4B5FD; font-size: 10px; font-family: Arial, Helvetica, sans-serif;
+    letter-spacing: 1px; padding: 4px 10px; border-radius: 999px;
 }
 </style>
 """
@@ -593,4 +654,33 @@ with col_d:
         st.markdown('<div class="rpa-card-title">POR UNIDAD DE NEGOCIO</div>', unsafe_allow_html=True)
         st.caption("Ordenado por cantidad de líneas")
         render_por_unidad(por_unidad)
+
+# --- Fila 4: evolución de órdenes con entrega ya generada (tiene_entrega = 'SI') ---
+where_entregas, params_entregas = construir_filtro_entregas(gerencias_sel, clases_sel, fecha_ini, fecha_fin)
+evolucion_entregas = calcular_evolucion(con, where_entregas, params_entregas)
+
+with st.container(border=True, key="card_entregas"):
+    col_t_ent, col_v_ent = st.columns([2.2, 1.6])
+    with col_t_ent:
+        st.markdown(
+            '<div class="rpa-card-title">EVOLUCIÓN DE ÓRDENES CON ENTREGA GENERADA'
+            '&nbsp;&nbsp;<span class="rpa-badge-morado">● YA TRABAJADOS</span></div>',
+            unsafe_allow_html=True,
+        )
+    with col_v_ent:
+        vista_entregas = st.segmented_control(
+            "Vista entregas", ["Día", "Semana", "Mensual"], default="Día",
+            key="vista_entregas", label_visibility="collapsed",
+        )
+    vista_entregas = vista_entregas or "Día"
+    st.caption(f"Solo traslados con entrega generada (tiene_entrega = 'SI') · por {vista_entregas.lower()}")
+    df_entregas = agrupar_evolucion(evolucion_entregas, vista_entregas)
+    st.plotly_chart(
+        grafico_ritmo_diario(
+            df_entregas,
+            mostrar_alerta=False,
+            usar_categorias=(vista_entregas != "Día"),
+        ),
+        width="stretch",
+    )
 
