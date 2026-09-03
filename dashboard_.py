@@ -81,13 +81,13 @@ def conectar(token: str):
 
 def obtener_metadatos(con):
     gerencias = con.execute(
-        f"SELECT DISTINCT {COL_GERENCIA} FROM {TABLA} ORDER BY 1"
+        f"SELECT DISTINCT {COL_GERENCIA} FROM {TABLA} WHERE tiene_entrega = 'NO' ORDER BY 1"
     ).df()[COL_GERENCIA].tolist()
     clases_doc = con.execute(
-        f"SELECT DISTINCT {COL_CLASE_DOC} FROM {TABLA} ORDER BY 1"
+        f"SELECT DISTINCT {COL_CLASE_DOC} FROM {TABLA} WHERE tiene_entrega = 'NO' ORDER BY 1"
     ).df()[COL_CLASE_DOC].tolist()
     fecha_min, fecha_max = con.execute(
-        f"SELECT MIN(CAST({COL_FECHA} AS DATE)), MAX(CAST({COL_FECHA} AS DATE)) FROM {TABLA}"
+        f"""SELECT MIN(CAST({COL_FECHA} AS DATE)), MAX(CAST({COL_FECHA} AS DATE)) FROM {TABLA} WHERE tiene_entrega = 'NO' """
     ).fetchone()
     return gerencias, clases_doc, fecha_min, fecha_max
 

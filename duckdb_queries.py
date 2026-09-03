@@ -18,7 +18,7 @@ def ejecutar_querys(ruta_db,df_zlo_pedi_val:pl.DataFrame ,df_marm:pl.DataFrame ,
 
                     UPDATE proyectado
                     SET tiene_entrega = 'SI'
-                    WHERE OT IN (SELECT DISTINCT(OT) FROM proyectado WHERE tiene_entrega = 'SI' )
+                    WHERE OT IN (SELECT DISTINCT(OT) FROM proyectado WHERE tiene_entrega = 'SI' );
 
                     DELETE FROM MARM;
                     INSERT INTO MARM SELECT * FROM df_marm;
