@@ -109,6 +109,21 @@ def construir_filtro(gerencias_sel, clases_sel, fecha_ini, fecha_fin):
     return where, params
 
 
+def construir_filtro_total(gerencias_sel, clases_sel, fecha_ini, fecha_fin):
+    """Igual que construir_filtro, pero SIN la restricción de tiene_entrega:
+    para métricas de brecha/total real (Brecha Acumulada), donde interesa el
+    universo completo de líneas sin excluir nada por tiene_entrega."""
+    ph_gerencias = ",".join(["?"] * len(gerencias_sel))
+    ph_clases = ",".join(["?"] * len(clases_sel))
+    where = (
+        f"WHERE {COL_GERENCIA} IN ({ph_gerencias}) "
+        f"AND {COL_CLASE_DOC} IN ({ph_clases}) "
+        f"AND CAST({COL_FECHA} AS DATE) BETWEEN ? AND ?"
+    )
+    params = list(gerencias_sel) + list(clases_sel) + [fecha_ini, fecha_fin]
+    return where, params
+
+
 def construir_filtro_entregas(gerencias_sel, clases_sel, fecha_ini, fecha_fin):
     """Igual que construir_filtro, pero sin la excepción de tiene_entrega='NO':
     aquí solo interesan las órdenes que YA tienen una entrega generada en SAP
@@ -610,6 +625,8 @@ with col2:
 
 # --- Fila 2: ritmo diario y brecha acumulada ---
 evolucion = calcular_evolucion(con, where, params)
+where_total, params_total = construir_filtro_total(gerencias_sel, clases_sel, fecha_ini, fecha_fin)
+evolucion_total = calcular_evolucion(con, where_total, params_total)
 col_a, col_b = st.columns(2)
 with col_a:
     with st.container(border=True):
@@ -636,8 +653,8 @@ with col_a:
 with col_b:
     with st.container(border=True):
         st.markdown('<div class="rpa-card-title">BRECHA ACUMULADA</div>', unsafe_allow_html=True)
-        st.caption("Cuánto se abre el pendiente sobre lo generado")
-        st.plotly_chart(grafico_brecha_acumulada(evolucion), width="stretch")
+        st.caption("Cuánto se abre el pendiente sobre lo generado · total sin filtrar por entrega")
+        st.plotly_chart(grafico_brecha_acumulada(evolucion_total), width="stretch")
 
 # --- Fila 3: por gerencia y unidad de negocio ---
 por_gerencia = calcular_por_categoria(con, COL_GERENCIA, where, params)
