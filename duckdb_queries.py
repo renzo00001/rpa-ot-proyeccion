@@ -10,9 +10,13 @@ token = os.getenv("TOKEN_MOTHERDUCK")
 def ejecutar_querys(ruta_db,df_zlo_pedi_val:pl.DataFrame ,df_marm:pl.DataFrame ,df_mm60:pl.DataFrame ,fecha_inicio,fecha_fin):
 
     try:
-        conn = duckdb.connect(ruta_db)
+        # conn = duckdb.connect(ruta_db)
+        conn = duckdb.connect('md:',config={'motherduck_token':token })
         # ACTUALIZAR BASE DE DATOS 
-        conn.execute(f""" 
+        conn.execute(f"""
+
+                    USE DB_proyeccion_md;
+                    
                     DELETE FROM proyectado WHERE fecha_entrega BETWEEN '{fecha_inicio}' AND '{fecha_fin}';
                     INSERT INTO proyectado SELECT * FROM df_zlo_pedi_val;
 
@@ -26,8 +30,8 @@ def ejecutar_querys(ruta_db,df_zlo_pedi_val:pl.DataFrame ,df_marm:pl.DataFrame ,
                     DELETE FROM MM60;
                     INSERT INTO MM60 SELECT * FROM df_mm60;
                     
-                    INSTALL motherduck;
-                    LOAD motherduck;
+                    --INSTALL motherduck;
+                    --LOAD motherduck;
         """)
 
 
@@ -55,12 +59,6 @@ def ejecutar_querys(ruta_db,df_zlo_pedi_val:pl.DataFrame ,df_marm:pl.DataFrame ,
 
         # Actualizar Tabla en Motherduck
         try:
-            # conexion a Motherduck
-            # os.environ["motherduck_token"] = token
-            conn.execute(f""" 
-                        SET motherduck_token = "{token}";
-                        ATTACH 'md:DB_proyeccion_final'; """)
-            
 
             conn.execute(" BEGIN TRANSACTION; ")
             conn.execute(f""" DELETE FROM DB_proyeccion_final.proyeccion_operativa_diaria 

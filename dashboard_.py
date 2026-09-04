@@ -386,6 +386,7 @@ CSS_TARJETAS = """
     border-radius: 10px; padding: 18px 20px; margin-bottom: 18px; }
 .rpa-card-title { font-family: Arial, Helvetica, sans-serif;
     letter-spacing: 2px; font-size: 11px; color: #8b93a7; }
+.rpa-card-header { min-height: 38px; display: flex; align-items: center; }
 .rpa-card-total { float: right; font-family: 'Courier New', monospace; font-size: 12px; color: #8b93a7; }
 .rpa-metric-row { display: flex; gap: 44px; margin: 14px 0 16px 0; }
 .rpa-metric-label { font-size: 12px; color: #8b93a7; }
@@ -411,6 +412,13 @@ div[data-testid="stColumn"]:has(.st-key-vista_ritmo) {
 }
 div[data-testid="stColumn"]:has(.st-key-vista_entregas) {
     display: flex; justify-content: flex-end; align-items: center;
+}
+div[data-testid="stHorizontalBlock"]:has(.st-key-vista_ritmo),
+div[data-testid="stHorizontalBlock"]:has(.st-key-vista_entregas) {
+    min-height: 38px; align-items: center;
+}
+div[data-testid="stElementContainer"]:has(.rpa-card-header) {
+    height: 38px !important;
 }
 .st-key-card_entregas {
     background: rgba(139, 92, 246, 0.08) !important;
@@ -632,7 +640,7 @@ with col_a:
     with st.container(border=True):
         col_titulo, col_vista = st.columns([1, 1.6])
         with col_titulo:
-            st.markdown('<div class="rpa-card-title" style="padding-top:8px;">RITMO DIARIO</div>',
+            st.markdown('<div class="rpa-card-title rpa-card-header">RITMO DIARIO</div>',
                          unsafe_allow_html=True)
         with col_vista:
             vista_ritmo = st.segmented_control(
@@ -652,8 +660,13 @@ with col_a:
         )
 with col_b:
     with st.container(border=True):
-        st.markdown('<div class="rpa-card-title">BRECHA ACUMULADA</div>', unsafe_allow_html=True)
-        st.caption("Cuánto se abre el pendiente sobre lo generado · total sin filtrar por entrega")
+        st.markdown(
+            '<div class="rpa-card-title rpa-card-header">BRECHA ACUMULADA '
+            '<span style="font-weight:normal; letter-spacing:0; opacity:0.6; font-size:10px;">'
+            '(total sin filtro de entrega)</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("Cuánto se abre el pendiente sobre lo generado")
         st.plotly_chart(grafico_brecha_acumulada(evolucion_total), width="stretch")
 
 # --- Fila 3: por gerencia y unidad de negocio ---
